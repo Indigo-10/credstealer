@@ -2,6 +2,17 @@
 
 this project shows how to intercept plaintext credentials during windows logins by hooking the `SpAcceptCredentials` function in `msv1_0.dll`. it's a proof of concept for educational purposes.
 
+**inspired by**: [@_xpn_'s work on ired.team](https://www.ired.team/offensive-security/credential-access-and-credential-dumping/intercepting-logon-credentials-by-hooking-msv1_0-spacceptcredentials)
+
+## what's different from the original
+
+this implementation extends the original concept with several key changes:
+
+- **network exfiltration**: sends credentials via tcp instead of writing to disk
+- **docker-based server**: includes a complete credential collection infrastructure  
+- **web interface**: provides a flask-based ui to view captured credentials
+- **better error handling**: more robust memory operations and unicode conversion
+
 ## how it works
 
 the stealer operates by:

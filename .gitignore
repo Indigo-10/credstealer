@@ -1,7 +1,5 @@
 # Build artifacts
 *.obj
-*.exe
-*.dll
 *.lib
 *.exp
 *.pdb
@@ -43,6 +41,7 @@ $RECYCLE.BIN/
 *.msm
 *.msp
 *.lnk
+*.dll
 
 # Credential stealer specific
 credentials.txt

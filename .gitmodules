@@ -1,0 +1,3 @@
+[submodule "skimmer-server"]
+	path = skimmer-server
+	url = https://github.com/23younesm/skimmer-server.git
